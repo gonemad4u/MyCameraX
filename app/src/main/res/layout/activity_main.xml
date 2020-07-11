@@ -10,7 +10,7 @@
         android:id="@+id/viewFinder"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        tools:layout_editor_absoluteX="-16dp"
+        tools:layout_editor_absoluteX="0dp"
         tools:layout_editor_absoluteY="0dp"/>
 
     <ImageView
@@ -18,13 +18,15 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:scaleType="centerCrop"
-        android:visibility="gone" />
+        android:visibility="gone"
+        android:contentDescription="@string/imageViewDescription" />
 
     <ImageView
-        android:id="@+id/fkfkfk"
+        android:id="@+id/detection"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:scaleType="centerCrop"/>
+        android:scaleType="centerCrop"
+        android:contentDescription="@string/detectDescription" />
 
     <Button
         android:id="@+id/pause_button"
