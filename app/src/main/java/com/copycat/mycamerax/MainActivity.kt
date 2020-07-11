@@ -44,10 +44,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // initiate ncnn shit
+        // Initiate NCNN
         val retInit = identify.init(assets)
         if (!retInit) {
-            Log.e("FK", "identify Init failed")
+            Log.e("Init", "Init failed!")
         }
         readCacheLabelFromLocalFile()
 
@@ -58,7 +58,6 @@ class MainActivity : AppCompatActivity() {
 
             if (pauseAnalysis) {
                 // If image analysis is in paused state, resume it
-                fkfkfk.setImageResource(android.R.color.transparent)
                 pauseAnalysis = false
                 image_predicted.visibility = View.GONE
 
@@ -95,10 +94,7 @@ class MainActivity : AppCompatActivity() {
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
 
-            var frameCounter = 0
-            var lastFpsTimestamp = System.currentTimeMillis()
             val converter = YuvToRgbConverter(this)
-
             imageAnalysis.setAnalyzer(executor, ImageAnalysis.Analyzer { image ->
                 if (!::bitmapBuffer.isInitialized) {
                     // The image rotation and RGB image buffer are initialized only once
@@ -112,28 +108,15 @@ class MainActivity : AppCompatActivity() {
                 if (pauseAnalysis) {
                     image.close()
                     runOnUiThread{
-                        fkfkfk.setImageResource(android.R.color.transparent)
-                        drawResults()
+                        drawResults(pauseAnalysis)
                     }
                     return@Analyzer
                 }
-                Log.d("Resolution", image.image?.height.toString() + " WITH " + image.image?.width.toString())
+
                 // Convert the image to RGB and place it in our shared buffer
                 image.use { converter.yuvToRgb(image.image!!, bitmapBuffer) }
 
-                drawResults()
-
-
-                // Compute the FPS of the entire pipeline
-                val frameCount = 10
-                if (++frameCounter % frameCount == 0) {
-                    frameCounter = 0
-                    val now = System.currentTimeMillis()
-                    val delta = now - lastFpsTimestamp
-                    val fps = 1000 * frameCount.toFloat() / delta
-                    Log.d(TAG, "FPS: ${"%.02f".format(fps)}")
-                    lastFpsTimestamp = now
-                }
+                drawResults(pauseAnalysis)
             })
 
             // Create a new camera selector each time, enforcing lens facing
@@ -150,59 +133,65 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    // draws results
-    private fun drawResults() {
+    private fun drawResults(paused: Boolean) {
         runOnUiThread{
+            // After converting to RGB the image becomes vertical and had to be flipped
             val matrix = Matrix().apply {
                 postRotate(imageRotationDegrees.toFloat())
                 if (isFrontFacing) postScale(-1f, 1f)
             }
             val uprightImage = Bitmap.createBitmap(
                 bitmapBuffer, 0, 0, bitmapBuffer.width, bitmapBuffer.height, matrix, true)
+
+            // If paused set the latest image to image view
+            if (paused) {image_predicted!!.setImageBitmap(uprightImage); image_predicted.visibility = View.VISIBLE}
+
+            // Since the model is trained with 300*300, incoming frame has to be resized
             val temp = Bitmap.createScaledBitmap(uprightImage, 300, 300, false)
             val result = identify.detect(temp, true)
-            //
+
+            // Create a empty bitmap to draw detection boxes
             val emptyBB = Bitmap.createBitmap(uprightImage.width, uprightImage.height, Bitmap.Config.ARGB_8888)
 
             val canvas = Canvas(emptyBB)
             val paint = Paint()
             val getFinalResult = backToTwoArrayLambda(result)
-            val num = result!!.size / 6 // number of object
-            // draw
-
+            val num = getFinalResult.size // 6 // number of labels
             var objectNum = 0
+
+            // For all objects detected
             while (objectNum < num) {
-                // draw on picture
+                // Box setting
                 paint.color = Color.MAGENTA
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 5f
-                canvas.drawRect(getFinalResult[objectNum][2] * emptyBB.width, getFinalResult[objectNum][3] * emptyBB.height,
-                    getFinalResult[objectNum][4] * emptyBB.width, getFinalResult[objectNum][5] * emptyBB.height, paint)
-                // draw label
-                paint.color = Color.RED
-                paint.style = Paint.Style.FILL
 
-                // Set text size
-                val testTextSize = 30f
-                val text = getFinalResult[objectNum][1].toString()
-                val bounds = Rect()
-                paint.getTextBounds(text, 0, text.length, bounds)
+                // Get rid of negatives
+                val left : Float = if (getFinalResult[objectNum][2] * emptyBB.width < 0) 0F else getFinalResult[objectNum][2] * emptyBB.width
+                val top : Float = if (getFinalResult[objectNum][3] * emptyBB.height < 0) 0F else getFinalResult[objectNum][3] * emptyBB.height
+                val right : Float = if (getFinalResult[objectNum][4] * emptyBB.width < 0) 0F else getFinalResult[objectNum][4] * emptyBB.width
+                val bottom : Float = if (getFinalResult[objectNum][5] * emptyBB.height < 0) 0F else getFinalResult[objectNum][5] * emptyBB.height
 
-                // Calculate the desired size as a proportion of our testTextSize.
-                val desiredTextSize: Float = testTextSize * 50 / bounds.width()
+                // Get rid of stupid detections
+                if (right < emptyBB.width.toFloat() * 0.9) {
+                    canvas.drawRect(
+                        left, top,
+                        right, bottom , paint)
 
-                // Set the paint for that size.
-                paint.textSize = desiredTextSize
-                canvas.drawText( resultLabel[getFinalResult[objectNum][0].toInt()].orEmpty(),
-                    getFinalResult[objectNum][2] * emptyBB.width , getFinalResult[objectNum][3] * emptyBB.height + 15, paint)
-                canvas.drawText(getFinalResult[objectNum][1].toString(),
-                    getFinalResult[objectNum][2] * emptyBB.width , getFinalResult[objectNum][3] * emptyBB.height + 35, paint)
+                    // Label setting
+                    paint.color = Color.RED
+                    paint.style = Paint.Style.FILL
+
+                    // Set text size and draw labels
+                    paint.textSize = 15f
+                    canvas.drawText( resultLabel[getFinalResult[objectNum][0].toInt()].orEmpty() + " (" + getFinalResult[objectNum][1].toString() + ")",
+                        left, top + 15, paint)
+                }
                 objectNum++
             }
-            image_predicted!!.setImageBitmap(uprightImage)
-            //
-            image_predicted.visibility = View.VISIBLE
-            fkfkfk!!.setImageBitmap(emptyBB)
+
+            // Paused or not detection needs to be set
+            detection!!.setImageBitmap(emptyBB)
         }
     }
 
@@ -232,7 +221,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Convenience method used to check if all permissions required by this app are granted */
+    // Convenience method used to check if all permissions required by this app are granted
     private fun hasPermissions(context: Context) = permissions.all {
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
     }
@@ -247,16 +236,13 @@ class MainActivity : AppCompatActivity() {
                 resultLabel.add(readLine)
             }
             reader.close()
-            Log.d("labelCache", "good")
         } catch (e: Exception) {
             Log.e("labelCache", "error $e")
         }
     }
 
     companion object {
-        private val TAG = MainActivity::class.java.simpleName
-
-        // restore the one dimensional array back to two dimensional array
+        // Restore the one dimensional array back to two dimensional array
         val backToTwoArrayLambda = {floatInput: FloatArray? ->
             val num = floatInput!!.size / 6
             val floatOutput = Array(num) { FloatArray(6) }
